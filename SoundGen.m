@@ -23,7 +23,7 @@ flag = 0;
 
 fmRxParams = getParamsSdrrFMExamples;
 
-fmRxParams.StopTime = 17;
+fmRxParams.StopTime = 20;
 fmRxParams.RadioSampleRate = 2e6;  %% Not being used
 fmRxParams.FrequencyDeviation = 1e6; %% Not being used
 fmRxParams.SamplesPerFrame = 512*10*3;
@@ -81,7 +81,8 @@ number_of_slices = 0;
 
 envelope_function = zeros(SPF, 1);
 
-
+first_frontier = 0;
+final_frontier = 0;
 
 initial_frame_discard = 5; % <  ---- specifies the number of disregarded initial frames at program startup, improves envelope stabilization and ultimately the sucess rate
 rising_edge_counter = 0;
@@ -107,6 +108,8 @@ counter_patterns = zeros(1, length(patterns));  % <---- counts how many patterns
 
 Interface = SoundGen_GUI;
 Interface.GUI_display_fc(num2str(Fc));
+
+debug_mode = 1; % <- binary variable that determines if permanent samples are stored for later debugging. WARNING: PROGRAM WILL SHARPLY DECREASE IN PERFORMANCE AFTER THE FIRST 20 SECONDS WHILE IN THIS MODE
 
 %% ===========================================================================
 %% MULTITHREADING (Gave up on this, unessecary and impossible to implement)
@@ -147,8 +150,6 @@ while radioTime < fmRxParams.StopTime
 
       threshold = mean(envelope_function(SPF*(n-1):end, 1:2), 2) .* thresh_gain + thresh_offset;
 
-      [highest_quality, offset_index] = Synchronize(frame_absolute, samples_per_bit , threshold);  % <---- precisa de ser muito mais otimizado, para que estou a analisar o sinal todo com abs(rcv(n)) para depois no loop seguinte o analisar por partes?
-
       % HORIZONTAL FRAMING (bit_frontier, word_window)
 
       window_variance = zeros(length(frame_absolute), 1);
@@ -166,57 +167,72 @@ while radioTime < fmRxParams.StopTime
       word_frontier(round(samples_per_word/1.66)+1 : end) = word_frontier(1:end-round(samples_per_word/1.66));
       word_frontier(end-round(samples_per_word/1.66)+1:end) = 0;
 
-
       number_of_slices = nnz(word_frontier);
 
       if number_of_slices > 2
 
-        frame_absolute_slices = cell(number_of_slices-1, 2);     % <<<< ----- allocate space for an array that will be stores in slices,
+        frame_absolute_slices = cell(number_of_slices-1, 4);     % <<<< ----- allocate space for an array that will be stores in slices,
         % each slice begins when a word begins or ends, thus the signal extracts the samples that have words on them. One of the slices
         %is ignored, it corresponds to the cropped part of the signal ant the beggining and end of frame.
+        % COLUMNS : 1 - SIGNAL; 2 - BIT FRONTIERS; 3 - RELEVANT THRESHOLD VALUES; 4 - DEMODULATED SIGNAL
 
         slice_index = find(word_frontier, number_of_slices);  % returns the index of the first n ones in the variable word_frontier, where n = number of slices
 
         for a1 = 1 : length(slice_index)-1;
           frame_absolute_slices{a1, 1} = frame_absolute(slice_index(a1, 1):slice_index(a1+1, 1));    % < -- save the signal itself in the first column of the cell array
-          [~, slice_offset] = Synchronize(frame_absolute, samples_per_bit , threshold);   % <--- save the corresponding bit frontiers for that slice and word in the respective row of the second column
-          
+          frame_absolute_slices{a1, 3} = threshold(slice_index(a1, 1):slice_index(a1+1, 1));
+          [~, slice_offset] = Synchronize(frame_absolute_slices{a1, 1}, samples_per_bit , frame_absolute_slices{a1, 3});   % <--- save the corresponding bit frontiers for that slice and word in the respective row of the second column
+
+          slice_bit_frontiers =  zeros(floor(length(frame_absolute_slices{a1, 1})/samples_per_bit), 1);
+
+          for a2 = 1 : length(slice_bit_frontiers)
+            slice_bit_frontiers(a2) = slice_offset + round((a2-1) * samples_per_bit);
+          end
+
+          frame_absolute_slices{a1, 2} = slice_bit_frontiers;
+
+
+
         end
       end
-
-
-
-      for a = 1 : (length(bit_frontier))  % <---- this for loop determines where one bit worth of samples ends and the next one begins, part of the synchro process reocurring in every frame. "discards" part of the beggining and end of every frame
-        bit_frontier(a) = offset_index + round((a-1) * samples_per_bit);
-      end
-
-        bit_frontier = bit_frontier(1:find(bit_frontier,1,'last'));   % <------ removes any trailing zeros the matrix might have, in case the number of bits it rounded to did not match the length of the preallocated space
 
       %Crop irrelevant data (at beggining and end) from the frame itself, threshold and envelope
-
-      frame_absolute = frame_absolute(bit_frontier(1):bit_frontier(end));
-      threshold = threshold(bit_frontier(1):bit_frontier(end));
-      envelope_function = envelope_function( (SPF*(n-1)+bit_frontier(1)):(SPF*(n-1)+bit_frontier(end)) , 1:2 );  %<<--- envelope uses the last n frames, but after its used to create a stable threshold we only need the data relevant to the nth (last) frame.
-
-      unmodulated_signal = ASK_Demod(frame_absolute, threshold, bit_frontier);
-
-      for z = 1 : length(unmodulated_signal)  % <------- detect patterns, bit by bit
-
-        bilmf(1:end-1) = bilmf(2:end);  % <---- Será vantajoso fazer isto de um a um ou seria melhor passar este ciclo para dentro de uma funçao?
-        bilmf(end) = unmodulated_signal(z);
-
-        if f > initial_frame_discard + n/3 % <---- the program has been running AND processing data for a while before it starts actively trying to identify patters, provides more accurate pattern recognition output data
-          counter_patterns =  counter_patterns + FindPattern(patterns, bilmf);
+      first_frontier = 0;
+      for a6 = 1 : length(frame_absolute_slices)
+        if ~isempty(frame_absolute_slices{a6, 2});
+          first_frontier = frame_absolute_slices{1, 2}(1);
         end
+      end
+        first_frontier = 1;
+      final_frontier = first_frontier;
+      for a5 = 1 : length(frame_absolute_slices)
+        final_frontier =  final_frontier + ((length(frame_absolute_slices{a5, 2})+2) * samples_per_bit);
+      end
+      final_frontier = round(final_frontier);
 
+      envelope_function = envelope_function( SPF*(n-1):end , 1:2 );  %<<--- envelope uses the last n frames, but after its used to create a stable threshold we only need the data relevant to the nth (last) frame.
+
+      for a3 = 1 : length(frame_absolute_slices)
+        frame_absolute_slices{a3, 4} = ASK_Demod(frame_absolute_slices{a3, 1}, frame_absolute_slices{a3, 3}, frame_absolute_slices{a3, 2});
+
+        for a4 = 1 : length(frame_absolute_slices{a3, 4})  % <------- detect patterns, bit by bit
+          bilmf(1:end-1) = bilmf(2:end);  % <---- Será vantajoso fazer isto de um a um ou seria melhor passar este ciclo para dentro de uma funçao?
+          bilmf(end) = frame_absolute_slices{a3, 4}(a4);
+
+          if f > initial_frame_discard + n/3 + 10% <---- the program has been running AND processing data for a while before it starts actively trying to identify patters, provides more accurate pattern recognition output data
+            counter_patterns =  counter_patterns + FindPattern(patterns, bilmf);
+          end
+        end
       end
 
-      allenvelope = cat(1, allenvelope, envelope_function);
-      allthreshold = cat(1, allthreshold, threshold);
-      allbit_frontier = cat(1, allbit_frontier, (bit_frontier(1:end-1) + ((f-1)*SPF) ) );
-      endresult = cat(1, endresult, unmodulated_signal);
-      allvariance = cat(1, allvariance, window_variance);
-      allword_frontier = cat(1, allword_frontier, word_frontier);
+      if debug_mode == 1
+        allenvelope = cat(1, allenvelope, envelope_function);
+        allthreshold = cat(1, allthreshold, threshold);
+        allbit_frontier = cat(1, allbit_frontier, (bit_frontier(1:end-1) + ((f-1)*SPF) ) );
+        endresult = cat(1, endresult, unmodulated_signal);
+        allvariance = cat(1, allvariance, window_variance);
+        allword_frontier = cat(1, allword_frontier, word_frontier);
+      end
 
       sucess_rate = counter_patterns(1, 1)/counter_patterns(1, 2);
 
