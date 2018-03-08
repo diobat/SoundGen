@@ -1,6 +1,6 @@
 function [result] = ASK_Demod(input, threshold, bit_frontier)
 
-result = zeros(length(bit_frontier)-2, 1); % << -- last interval is ignored, hence the -2
+  result = zeros(length(bit_frontier)-1, 1); % << -- intervals, not borders, hence the -1
 
 for b1 = 1 : (length(bit_frontier)-2) % << -- last interval is ignored, so the last relevant interval is between frontier(end-2) and frontier(end-1)
 

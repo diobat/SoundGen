@@ -23,7 +23,7 @@ flag = 0;
 
 fmRxParams = getParamsSdrrFMExamples;
 
-fmRxParams.StopTime = 60;
+fmRxParams.StopTime = 20;
 fmRxParams.RadioSampleRate = 2e6;  %% Not being used
 fmRxParams.FrequencyDeviation = 1e6; %% Not being used
 fmRxParams.SamplesPerFrame = 512*10*3;
@@ -54,7 +54,7 @@ bits_per_frame = SPF/samples_per_bit;
 samples_per_word = samples_per_bit * bits_per_word;
 
 frame_absolute = zeros(SPF, 1);  % <-------- store here each frame as it is harvested from the analisar
-n = 40; % <------ select number of previous frames to be kept in a buffer. Bigger n = better envelope + bigger processing time;
+n = 20; % <------ select number of previous frames to be kept in a buffer. Bigger n = better envelope + bigger processing time;
 last_n_frames = zeros (SPF * n, 1); %<----- store here last n frames for posterior envelope calculating purposes
 unmodulated_signal = zeros(1000, 1);  % <----- Demodulated signal gets stored here for later use in pattern recognition
 
@@ -82,8 +82,8 @@ number_of_slices = 0;
 
 envelope_function = zeros(SPF, 1);
 
-first_frontier = 0;
-final_frontier = 0;
+first_frontier = 1;
+final_frontier = 1;
 
 initial_frame_discard = 5; % <  ---- specifies the number of disregarded initial frames at program startup, improves envelope stabilization and ultimately the sucess rate
 rising_edge_counter = 0;
@@ -97,7 +97,7 @@ envelope_offset = 0; % <------ envelope line control
 frame_start = zeros(1000,1);
 bit_frontier = zeros(floor(SPF / samples_per_bit), 1); % <--- space allocation for the array that will store the indexes of the samples that separate two different bits
 
-desired_result = transpose([1 1 0 1 0 1 0 1 0 1 0]);
+desired_result = transpose([0 0 1 1 0 1 0 1 0 1 0 1 0]);
 reset_pattern = transpose([0 0 0 0 0 0 0 0 0 1]);
 rising_edge = transpose([0 1]);
 patterns = {desired_result; reset_pattern; rising_edge};
@@ -111,7 +111,7 @@ counter_patterns = zeros(1, length(patterns));  % <---- counts how many patterns
 Interface = SoundGen_GUI;
 Interface.GUI_display_fc(num2str(Fc));
 
-debug_mode = 0; % <- binary variable that determines if permanent samples are stored for later debugging. WARNING: PROGRAM WILL SHARPLY DECREASE IN PERFORMANCE AFTER THE FIRST 20 SECONDS WHILE IN THIS MODE
+debug_mode = 1; % <- binary variable that determines if permanent samples are stored for later debugging. WARNING: PROGRAM WILL SHARPLY DECREASE IN PERFORMANCE AFTER THE FIRST 20 SECONDS WHILE IN THIS MODE
 
 %% ===========================================================================
 %% MULTITHREADING (Gave up on this, unessecary and impossible to implement)
@@ -129,7 +129,6 @@ pause(2);
 tic;
 while radioTime < fmRxParams.StopTime
   % Receive baseband samples (Signal Source)
-
   if ~isempty(sdrinfo(radio.RadioAddress))
 
     [rcv,~] = step(radio);
@@ -137,8 +136,6 @@ while radioTime < fmRxParams.StopTime
     f = f + 1; % increase frames processed counter
 
     if f > initial_frame_discard  % <----- discard first frames from processing to discard initial hardware calibration phase and smoothen the envelope
-
-      allsamples = cat(1, allsamples, frame_absolute);
 
       last_n_frames(1:end-SPF) = last_n_frames(SPF+1:end);
       last_n_frames(SPF*(n-1) + 1 :end) = frame_absolute;
@@ -192,23 +189,11 @@ while radioTime < fmRxParams.StopTime
 
         end
 
-        first_frontier = 1;
-        for a6 = 1 : length(data)
-          if ~isempty(data{a6, 2});
-            first_frontier = data{a6, 2}(1);
-          end
-        end
-
-        final_frontier = first_frontier;
-        for a5 = 1 : length(data)
-          final_frontier =  final_frontier + ((length(data{a5, 2})+2) * samples_per_bit);
-        end
-        final_frontier = round(final_frontier);
-
-        envelope_function = envelope_function( SPF*(n-1):end , 1:2 );  %<<--- envelope uses the last n frames, but after its used to create a stable threshold we only need the data relevant to the nth (last) frame.
-
         for a3 = 1 : length(data)
-          data{a3, 4} = ASK_Demod(data{a3, 1}, data{a3, 3}, data{a3, 2});
+
+          data{a3, 5} = intervals_average(data{a3, 1}, data{a3, 2});
+
+          data{a3, 4} = ASK_Demod(data{a3, 1}, (data{a3, 3} .* thresh_gain) + thresh_offset, data{a3, 2});
 
           for a4 = 1 : length(data{a3, 4})  % <------- detect patterns, bit by bit
             bilmf(1:end-1) = bilmf(2:end);  % <---- Será vantajoso fazer isto de um a um ou seria melhor passar este ciclo para dentro de uma funçao?
@@ -222,16 +207,21 @@ while radioTime < fmRxParams.StopTime
       end
 
       if debug_mode == 1
+
+        envelope_function = envelope_function( SPF*(n-1):end , 1:2 );  %<<--- envelope uses the last n frames, but after its used to create a stable threshold we only need the data relevant to the nth (last) frame.
+
         for a7 = 1 : length(data)
 
           allthreshold = cat(1, allthreshold, data{a7, 3});
           endresult = cat(1, endresult, data{a7, 4});
 
         end
+        allsamples = cat(1, allsamples, frame_absolute);
         allword_frontier = cat(1, allword_frontier, word_frontier);
         allenvelope = cat(1, allenvelope, envelope_function);
         allvariance = cat(1, allvariance, window_variance);
-        %allbit_frontier = cat(1, allbit_frontier, (data{a7, 2} + ((f-1)*SPF) ) );
+        %allthreshold = cat(1, allthreshold, threshold);
+        allbit_frontier = cat(1, allbit_frontier, (data{a7, 2} + ((f-1)*SPF) ) );
       end
 
       word_success_rate = (counter_patterns(1, 1)/counter_patterns(1, 2));
@@ -273,11 +263,9 @@ end
 %% END OF MAIN CYCLE
 %% ===========================================================================
 
-
 %% ===========================================================================
 %% RELEASE SYSTEM RESOURCES
 %% ===========================================================================
-
 
 release(radio);
 delete(Interface);
@@ -289,96 +277,6 @@ disp(bit_success_rate);
 %% FINAL CHARTS
 %% ===========================================================================
 
-%power_amp = abs(allsamples(round(length(allsamples)*0.2) : end));
-
-
-%absolute_signal = abs(allsamples);
-%absolute_signal = absolute_signal(round(length(absolute_signal)*0.25):end);
-
-%[yupper,ylower] = envelope(absolute_signal, 50000 ,'peak');
-
-%fronteira = [yupper,ylower];
-%threshold = mean(fronteira, 2) .* thresh_gain + thresh_offset;
-
-%[highest_quality, offset_index] = Synchronize(absolute_signal, samples_per_bit , threshold)
-
-
-%index_peak = single(index);
-%figure(2);
-%title('Number of samples per power')
-%xlabel('Power (after AGC)')
-%ylabel('Total number of samples collected')
-
-%histogram(power_amp)
-%figure(3);
-%FourierT(absolute_signal, Fs);
-
-%figure(5);
-%ax = gca;
-%ax.XTicks = index
-%ax.XTickMode = 'manual'
-
-%grid on;
-%plot(absolute_signal);
-%hold on;
-%plot(yupper, 'r');
-%plot(ylower, 'r');
-%plot(threshold, 'k');
-%plot(index, peaks, 'og')
-%ylim([0 1.5])
-
-
-%% Descobrir os limites de separação entre bits
-%bit_frontier = zeros(floor(length(absolute_signal) / samples_per_bit), 1);
-
-%for a = 1 : length(bit_frontier)
-%  bit_frontier(a) = offset_index + round(((a-1) * samples_per_bit));
-%end
-
-%result = zeros(length(bit_frontier), 1);
-
-
-%% THRESHOLD APPLICATION
-
-%for b1 = 1 : (length(bit_frontier)-1)
-%
-%b2 = mean(absolute_signal(bit_frontier(b1):bit_frontier(b1+1)));
-%
-%if b2 > threshold(bit_frontier(b1))
-%  result(b1) = 1;
-%end
-
-%z = plot([bit_frontier(b1), bit_frontier(b1+1)], [b2,b2] , '--r');
-%z1 = plot([bit_frontier(b1), bit_frontier(b1)], [0, 1.5], 'k');  %<---- comment to turn off black vertical separation lines
-%end
-
-%figure(6);
-
-%result = ~result;  % invert the result
-
-%plot(result);
-%ylim([-0.5, 1.5]);
-
-%patterns_found_map = FindPattern(desired_result, result);
-%reset_pattern_map = FindPattern(reset_pattern, result);
-
-%tries = nnz(reset_pattern_map);
-%hits = nnz(patterns_found_map);
-%bits_per_cycle = length(reset_pattern_map)/tries;
-
-%sucess_rate = hits/tries
-
-%scatter(efficiency(:,1)*512, efficiency(:,2));
-
-%subplot(2,1,2);
-%plot (endresult)
-
-%xlabel('Samples')
-
-%ylabel('Bit')
-%k = find(allsamples);  % encontrar a posi�ao de todos os valores diferentes de zero no array allsamples
-%k1 = max(k);  % encontrar a posi��o o ultimo valor diferente de zero no array allsamples
-%axis([0 k1 -0.1 1.1])
 
 %% ===========================================================================
 %% END OF PROGRAM
