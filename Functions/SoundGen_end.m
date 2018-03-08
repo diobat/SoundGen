@@ -1,0 +1,1 @@
+function red(arg1)
