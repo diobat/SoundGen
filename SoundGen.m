@@ -23,7 +23,7 @@ flag = 0;
 
 fmRxParams = getParamsSdrrFMExamples;
 
-fmRxParams.StopTime = 20;
+fmRxParams.StopTime = 60;
 fmRxParams.RadioSampleRate = 2e6;  %% Not being used
 fmRxParams.FrequencyDeviation = 1e6; %% Not being used
 fmRxParams.SamplesPerFrame = 512*10*3;
@@ -59,6 +59,7 @@ last_n_frames = zeros (SPF * n, 1); %<----- store here last n frames for posteri
 unmodulated_signal = zeros(1000, 1);  % <----- Demodulated signal gets stored here for later use in pattern recognition
 
 f = 0;  % <----- total frames processed counter;
+data = [];
 endresult = [];
 allsamples = [];
 allthreshold = [];
@@ -86,7 +87,8 @@ final_frontier = 0;
 
 initial_frame_discard = 5; % <  ---- specifies the number of disregarded initial frames at program startup, improves envelope stabilization and ultimately the sucess rate
 rising_edge_counter = 0;
-sucess_rate = 0; % <------ hits/tries (NOT 100% TRUSTABLE);
+word_success_rate = 0; % <------ hits/tries (NOT 100% TRUSTABLE);
+bit_success_rate = 0; % <------ nthroot(bits_per_word, word_success_rate)
 
 thresh_gain= 1;  % <------ threshold line control
 thresh_offset = 0;
@@ -109,7 +111,7 @@ counter_patterns = zeros(1, length(patterns));  % <---- counts how many patterns
 Interface = SoundGen_GUI;
 Interface.GUI_display_fc(num2str(Fc));
 
-debug_mode = 1; % <- binary variable that determines if permanent samples are stored for later debugging. WARNING: PROGRAM WILL SHARPLY DECREASE IN PERFORMANCE AFTER THE FIRST 20 SECONDS WHILE IN THIS MODE
+debug_mode = 0; % <- binary variable that determines if permanent samples are stored for later debugging. WARNING: PROGRAM WILL SHARPLY DECREASE IN PERFORMANCE AFTER THE FIRST 20 SECONDS WHILE IN THIS MODE
 
 %% ===========================================================================
 %% MULTITHREADING (Gave up on this, unessecary and impossible to implement)
@@ -132,9 +134,7 @@ while radioTime < fmRxParams.StopTime
 
     [rcv,~] = step(radio);
     frame_absolute = abs(rcv);
-
     f = f + 1; % increase frames processed counter
-
 
     if f > initial_frame_discard  % <----- discard first frames from processing to discard initial hardware calibration phase and smoothen the envelope
 
@@ -160,7 +160,6 @@ while radioTime < fmRxParams.StopTime
         window_variance(a0, 1) = var(word_window);
       end
 
-
       split = (max(window_variance)-min(window_variance))*0.2;
       word_map = im2bw(window_variance, split);
       word_frontier = abs(word_map(1:end-1) - word_map(2:end));  % <------ these three lines create an array that is filled with zeros except when a word begins or ends
@@ -171,70 +170,75 @@ while radioTime < fmRxParams.StopTime
 
       if number_of_slices > 2
 
-        frame_absolute_slices = cell(number_of_slices-1, 4);     % <<<< ----- allocate space for an array that will be stores in slices,
+        data = cell(number_of_slices-1, 5);     % <<<< ----- allocate space for an array that will be stores in slices,
         % each slice begins when a word begins or ends, thus the signal extracts the samples that have words on them. One of the slices
         %is ignored, it corresponds to the cropped part of the signal ant the beggining and end of frame.
         % COLUMNS : 1 - SIGNAL; 2 - BIT FRONTIERS; 3 - RELEVANT THRESHOLD VALUES; 4 - DEMODULATED SIGNAL
 
+
         slice_index = find(word_frontier, number_of_slices);  % returns the index of the first n ones in the variable word_frontier, where n = number of slices
 
         for a1 = 1 : length(slice_index)-1;
-          frame_absolute_slices{a1, 1} = frame_absolute(slice_index(a1, 1):slice_index(a1+1, 1));    % < -- save the signal itself in the first column of the cell array
-          frame_absolute_slices{a1, 3} = threshold(slice_index(a1, 1):slice_index(a1+1, 1));
-          [~, slice_offset] = Synchronize(frame_absolute_slices{a1, 1}, samples_per_bit , frame_absolute_slices{a1, 3});   % <--- save the corresponding bit frontiers for that slice and word in the respective row of the second column
-
-          slice_bit_frontiers =  zeros(floor(length(frame_absolute_slices{a1, 1})/samples_per_bit), 1);
+          data{a1, 1} = frame_absolute(slice_index(a1, 1):slice_index(a1+1, 1));    % < -- save the signal itself in the first column of the cell array
+          data{a1, 3} = threshold(slice_index(a1, 1):slice_index(a1+1, 1));
+          [~, slice_offset] = Synchronize(data{a1, 1}, samples_per_bit , data{a1, 3});   % <--- save the corresponding bit frontiers for that slice and word in the respective row of the second column
+          slice_bit_frontiers =  zeros(floor(length(data{a1, 1})/samples_per_bit), 1);
 
           for a2 = 1 : length(slice_bit_frontiers)
             slice_bit_frontiers(a2) = slice_offset + round((a2-1) * samples_per_bit);
           end
 
-          frame_absolute_slices{a1, 2} = slice_bit_frontiers;
-
-
+          data{a1, 2} = slice_bit_frontiers;
 
         end
-      end
 
-      %Crop irrelevant data (at beggining and end) from the frame itself, threshold and envelope
-      first_frontier = 0;
-      for a6 = 1 : length(frame_absolute_slices)
-        if ~isempty(frame_absolute_slices{a6, 2});
-          first_frontier = frame_absolute_slices{1, 2}(1);
-        end
-      end
         first_frontier = 1;
-      final_frontier = first_frontier;
-      for a5 = 1 : length(frame_absolute_slices)
-        final_frontier =  final_frontier + ((length(frame_absolute_slices{a5, 2})+2) * samples_per_bit);
-      end
-      final_frontier = round(final_frontier);
+        for a6 = 1 : length(data)
+          if ~isempty(data{a6, 2});
+            first_frontier = data{a6, 2}(1);
+          end
+        end
 
-      envelope_function = envelope_function( SPF*(n-1):end , 1:2 );  %<<--- envelope uses the last n frames, but after its used to create a stable threshold we only need the data relevant to the nth (last) frame.
+        final_frontier = first_frontier;
+        for a5 = 1 : length(data)
+          final_frontier =  final_frontier + ((length(data{a5, 2})+2) * samples_per_bit);
+        end
+        final_frontier = round(final_frontier);
 
-      for a3 = 1 : length(frame_absolute_slices)
-        frame_absolute_slices{a3, 4} = ASK_Demod(frame_absolute_slices{a3, 1}, frame_absolute_slices{a3, 3}, frame_absolute_slices{a3, 2});
+        envelope_function = envelope_function( SPF*(n-1):end , 1:2 );  %<<--- envelope uses the last n frames, but after its used to create a stable threshold we only need the data relevant to the nth (last) frame.
 
-        for a4 = 1 : length(frame_absolute_slices{a3, 4})  % <------- detect patterns, bit by bit
-          bilmf(1:end-1) = bilmf(2:end);  % <---- Será vantajoso fazer isto de um a um ou seria melhor passar este ciclo para dentro de uma funçao?
-          bilmf(end) = frame_absolute_slices{a3, 4}(a4);
+        for a3 = 1 : length(data)
+          data{a3, 4} = ASK_Demod(data{a3, 1}, data{a3, 3}, data{a3, 2});
 
-          if f > initial_frame_discard + n/3 + 10% <---- the program has been running AND processing data for a while before it starts actively trying to identify patters, provides more accurate pattern recognition output data
-            counter_patterns =  counter_patterns + FindPattern(patterns, bilmf);
+          for a4 = 1 : length(data{a3, 4})  % <------- detect patterns, bit by bit
+            bilmf(1:end-1) = bilmf(2:end);  % <---- Será vantajoso fazer isto de um a um ou seria melhor passar este ciclo para dentro de uma funçao?
+            bilmf(end) = data{a3, 4}(a4);
+
+            if f > initial_frame_discard + n/3 + 10% <---- the program has been running AND processing data for a while before it starts actively trying to identify patters, provides more accurate pattern recognition output data
+              counter_patterns =  counter_patterns + FindPattern(patterns, bilmf);
+            end
           end
         end
       end
 
       if debug_mode == 1
-        allenvelope = cat(1, allenvelope, envelope_function);
-        allthreshold = cat(1, allthreshold, threshold);
-        allbit_frontier = cat(1, allbit_frontier, (bit_frontier(1:end-1) + ((f-1)*SPF) ) );
-        endresult = cat(1, endresult, unmodulated_signal);
-        allvariance = cat(1, allvariance, window_variance);
+        for a7 = 1 : length(data)
+
+          allthreshold = cat(1, allthreshold, data{a7, 3});
+          endresult = cat(1, endresult, data{a7, 4});
+
+        end
         allword_frontier = cat(1, allword_frontier, word_frontier);
+        allenvelope = cat(1, allenvelope, envelope_function);
+        allvariance = cat(1, allvariance, window_variance);
+        %allbit_frontier = cat(1, allbit_frontier, (data{a7, 2} + ((f-1)*SPF) ) );
       end
 
-      sucess_rate = counter_patterns(1, 1)/counter_patterns(1, 2);
+      word_success_rate = (counter_patterns(1, 1)/counter_patterns(1, 2));
+      bit_success_rate = nthroot(word_success_rate, bits_per_word);
+
+      word_success_rate = word_success_rate * 100;
+      bit_success_rate = bit_success_rate * 100;
 
       pause(1e-8);
 
@@ -249,8 +253,12 @@ while radioTime < fmRxParams.StopTime
     end
 
   end
+
+
   Interface.GUI_plot(bilmf);
   Interface.GUI_RE_counter(num2str(counter_patterns(3)));
+
+  Interface.GUI_stats(num2str(counter_patterns(1)), strcat(num2str(word_success_rate),'%'), strcat(num2str(bit_success_rate),'%'));
   pause(1e-7);
 
   % Update radio time.
@@ -274,7 +282,8 @@ end
 release(radio);
 delete(Interface);
 
-disp(sucess_rate);
+disp(word_success_rate);
+disp(bit_success_rate);
 
 %% ===========================================================================
 %% FINAL CHARTS
