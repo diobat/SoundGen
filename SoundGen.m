@@ -23,7 +23,7 @@ flag = 0;
 
 fmRxParams = getParamsSdrrFMExamples;
 
-fmRxParams.StopTime = 20;
+fmRxParams.StopTime = 15;
 fmRxParams.RadioSampleRate = 2e6;  %% Not being used
 fmRxParams.FrequencyDeviation = 1e6; %% Not being used
 fmRxParams.SamplesPerFrame = 512*10*3;
@@ -144,8 +144,8 @@ while radioTime < fmRxParams.StopTime
 
       [yupper,ylower] = envelope(last_n_frames, 100000 ,'peak');
       envelope_function = [yupper,ylower];
-
-      threshold = mean(envelope_function(SPF*(n-1):end, 1:2), 2) .* thresh_gain + thresh_offset;
+      envelope_function = envelope_function(end-length(frame_absolute)+1:end , 1:2);
+      threshold = (mean(envelope_function, 2) .* thresh_gain) + thresh_offset;
 
       % HORIZONTAL FRAMING (bit_frontier, word_window)
 
@@ -170,14 +170,20 @@ while radioTime < fmRxParams.StopTime
         data = cell(number_of_slices-1, 5);     % <<<< ----- allocate space for an array that will be stores in slices,
         % each slice begins when a word begins or ends, thus the signal extracts the samples that have words on them. One of the slices
         %is ignored, it corresponds to the cropped part of the signal ant the beggining and end of frame.
-        % COLUMNS : 1 - SIGNAL; 2 - BIT FRONTIERS; 3 - RELEVANT THRESHOLD VALUES; 4 - DEMODULATED SIGNAL
-
+        % COLUMNS :
+          %1 - SIGNAL;
+          %2 - BIT FRONTIERS;
+          %3 - RELEVANT THRESHOLD VALUES;
+          %4 - DEMODULATED SIGNAL
+          %5 - INTRA FRONTIERS AVERAGE VALUES
+          %6 - UPPER AND LOWER ENVELOPES
 
         slice_index = find(word_frontier, number_of_slices);  % returns the index of the first n ones in the variable word_frontier, where n = number of slices
 
         for a1 = 1 : length(slice_index)-1;
           data{a1, 1} = frame_absolute(slice_index(a1, 1):slice_index(a1+1, 1));    % < -- save the signal itself in the first column of the cell array
           data{a1, 3} = threshold(slice_index(a1, 1):slice_index(a1+1, 1));
+          data{a1, 6} = envelope_function(slice_index(a1, 1):slice_index(a1+1, 1), 1:2);
           [~, slice_offset] = Synchronize(data{a1, 1}, samples_per_bit , data{a1, 3});   % <--- save the corresponding bit frontiers for that slice and word in the respective row of the second column
           slice_bit_frontiers =  zeros(floor(length(data{a1, 1})/samples_per_bit), 1);
 
@@ -189,7 +195,11 @@ while radioTime < fmRxParams.StopTime
 
         end
 
+        % DATA PROCESSING
+
         for a3 = 1 : length(data)
+
+          %data{a3, 6} =
 
           data{a3, 5} = intervals_average(data{a3, 1}, data{a3, 2});
 
@@ -208,8 +218,6 @@ while radioTime < fmRxParams.StopTime
 
       if debug_mode == 1
 
-        envelope_function = envelope_function( SPF*(n-1):end , 1:2 );  %<<--- envelope uses the last n frames, but after its used to create a stable threshold we only need the data relevant to the nth (last) frame.
-
         for a7 = 1 : length(data)
 
           allthreshold = cat(1, allthreshold, data{a7, 3});
@@ -221,7 +229,7 @@ while radioTime < fmRxParams.StopTime
         allenvelope = cat(1, allenvelope, envelope_function);
         allvariance = cat(1, allvariance, window_variance);
         %allthreshold = cat(1, allthreshold, threshold);
-        allbit_frontier = cat(1, allbit_frontier, (data{a7, 2} + ((f-1)*SPF) ) );
+        %allbit_frontier = cat(1, allbit_frontier, (data{a7, 2} + ((f-1)*SPF) ) );
       end
 
       word_success_rate = (counter_patterns(1, 1)/counter_patterns(1, 2));
