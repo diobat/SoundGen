@@ -1,14 +1,14 @@
-function [highest_quality, offset_index] = Synchronize(signal, blockSampleSize, threshold)
+function [highest_quality, offset_index] = Synchronize(signal, samples_per_bit, threshold)
 
 
-quality = zeros(ceil(blockSampleSize),1);
+quality = zeros(ceil(samples_per_bit),1);
 
-numberOfBlocks = floor(length(signal)/ blockSampleSize);
+number_of_bits = floor(length(signal)/ samples_per_bit);
 
-for i = 1 : blockSampleSize
+for i = 1 : samples_per_bit
 amplitudeSum = 0;
-  for a = 0 : (numberOfBlocks-2)
-    for b = (floor(a*blockSampleSize)+i) : floor((a+1)*blockSampleSize+i)
+  for a = 0 : (number_of_bits-2)
+    for b = (floor(a*samples_per_bit)+i) : floor((a+1)*samples_per_bit+i)
       amplitudeSum = abs(signal(b) - threshold(b));
       quality(i) = quality(i) + amplitudeSum;
     end

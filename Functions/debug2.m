@@ -1,5 +1,36 @@
+extensive_debug = 1;
+
 
 figure(10);
+
+samples_processed = 0;
+sub_frames_processed = 0;
+
+allsamples = [];
+allthreshold = [];
+allbit_frontier = [];
+allenvelope = [,];
+endresult = [];
+allintra_frontier_averages = [];
+allvariance = [];
+allword_frontier = [];
+
+for x = 1 : length(alldata);
+
+  allsamples = cat(1, allsamples, alldata{x, 1});
+  allenvelope = cat(1, allenvelope, alldata{x, 6});
+  allthreshold = cat (1, allthreshold, alldata{x, 3});
+  endresult = cat(1, endresult, alldata{x, 4});
+  allbit_frontier = cat(1, allbit_frontier, alldata{x, 2} + samples_processed);
+  allintra_frontier_averages = cat(1, allintra_frontier_averages , alldata{x, 5});
+  allvariance = cat(1, allvariance, alldata{x, 7});
+  allword_frontier = cat(1, allword_frontier, alldata{x, 8});
+
+  samples_processed = samples_processed + length(alldata{x, 1});
+  sub_frames_processed = sub_frames_processed + 1;
+end
+
+
 
 
 plot(allsamples);
@@ -13,26 +44,43 @@ plot(allthreshold, 'k');
 ylim([0 1.5])
 grid on;
 
-for x=1:fmRxParams.SamplesPerFrame:length(allsamples)
+y = 1:SPF:length(allsamples);
 
-plot([x x], [0 1], 'm');
+for x=1:SPF:length(allsamples)
+
+  plot([x x], [0 1.5], 'm');
 
 end
 
-offset = 0.5;
+
+
+offset = 1.2;
 pos = 1:length(allvariance);
 
 
-plot(pos,allvariance * 40 + offset, 'c');
+plot(pos, allvariance * 20 + offset, 'c');
 
-split= (max(allvariance)-min(allvariance))*0.2;
+split = (max(allvariance)-min(allvariance))*0.2;
 split_bin = im2bw(allvariance, split);
 
-split = split * 40 + offset;
+split = split * 20 + offset;
 pos3 = 1:1:length(split_bin);
 
 plot([1 length(allvariance)], [split split], 'k');
+
+
 %plot(pos3, split_bin * 0.1 + 0.5, 'r');
 
 pos4 = 1:1:length(allword_frontier);
-plot(pos4, allword_frontier* 0.1 + offset, 'r');
+plot(pos4, allword_frontier* -0.6 + offset, 'r');
+
+
+if extensive_debug == 1
+  for b1 = 1 : length(endresult)-1 % <---- corta um bocado o fim para evitar warnings the mismatched lengths, isto pode significar que as fronteiras apresentadas nao sejam fidedignas
+    b2 = mean(allsamples (allbit_frontier(b1):allbit_frontier(b1+1)));
+    b3 = endresult(b1);
+  plot([allbit_frontier(b1), allbit_frontier(b1+1)], [b2,b2] , '--r');
+  plot([allbit_frontier(b1), allbit_frontier(b1+1)], [b3, b3] .*0.4 + 0.7, '--k')
+  %z1 = plot([bit_frontier(b1), bit_frontier(b1)], [0, 1.5], 'k');  %<---- comment to turn off black vertical separation lines
+  end
+end
