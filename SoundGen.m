@@ -23,7 +23,7 @@ flag = 0;
 
 fmRxParams = getParamsSdrrFMExamples;
 
-fmRxParams.StopTime = 15;
+fmRxParams.StopTime = 14;
 fmRxParams.RadioSampleRate = 2e6;  %% Not being used
 fmRxParams.FrequencyDeviation = 1e6; %% Not being used
 fmRxParams.SamplesPerFrame = 512*10*3;
@@ -60,11 +60,11 @@ unmodulated_signal = zeros(1000, 1);  % <----- Demodulated signal gets stored he
 
 f = 0;  % <----- total frames processed counter;
 data = [];
+alldata = [];
 endresult = [];
-allsamples = [];
-allthreshold = [];
-allbit_frontier = [];
-allenvelope = [,];
+
+
+
 allvariance = [];
 allword_frontier = [];
 
@@ -74,7 +74,7 @@ bilmf = zeros(ceil(bits_per_frame * m), 1);  % <-------- Bits in Last m Frames: 
 
 % WORD DETECTION VARIABLES
 
-word_window = zeros( ceil(samples_per_bit*(bits_per_word+2)) , 1);
+word_window = zeros( ceil(samples_per_bit*(bits_per_word)) , 1);
 window_variance = [];
 word_map = [];
 word_frontier = [];
@@ -138,36 +138,38 @@ while radioTime < fmRxParams.StopTime
     if f > initial_frame_discard  % <----- discard first frames from processing to discard initial hardware calibration phase and smoothen the envelope
 
       last_n_frames(1:end-SPF) = last_n_frames(SPF+1:end);
-      last_n_frames(SPF*(n-1) + 1 :end) = frame_absolute;
+      last_n_frames(end-SPF + 1 :end) = frame_absolute;
 
       % VERTICAL FRAMING (ENVELOPE)
 
       [yupper,ylower] = envelope(last_n_frames, 100000 ,'peak');
       envelope_function = [yupper,ylower];
-      envelope_function = envelope_function(end-length(frame_absolute)+1:end , 1:2);
+      envelope_function = envelope_function(end-SPF+1:end , 1:2);
       threshold = (mean(envelope_function, 2) .* thresh_gain) + thresh_offset;
 
       % HORIZONTAL FRAMING (bit_frontier, word_window)
 
-      window_variance = zeros(length(frame_absolute), 1);
+      window_variance = zeros(SPF, 1);
 
-      for a0 = 1 : length(frame_absolute) - length(word_window) - 1
+      for a0 = 1 : SPF - length(word_window)
         %window_stop = a0+length(word_window)-1;
         word_window = frame_absolute(a0:a0+length(word_window)-1);
         window_variance(a0, 1) = var(word_window);
       end
+      window_variance(a0+1:end) = window_variance(a0);
 
       split = (max(window_variance)-min(window_variance))*0.2;
       word_map = im2bw(window_variance, split);
-      word_frontier = abs(word_map(1:end-1) - word_map(2:end));  % <------ these three lines create an array that is filled with zeros except when a word begins or ends
+      word_frontier = [(abs(word_map(1:end-1)-word_map(2:end))); 0];  % <------ these three lines create an array that is filled with zeros except when a word begins or ends
       word_frontier(round(samples_per_word/1.66)+1 : end) = word_frontier(1:end-round(samples_per_word/1.66));
-      word_frontier(end-round(samples_per_word/1.66)+1:end) = 0;
+      word_frontier(1:round(samples_per_word/1.66)) = 0;
+
 
       number_of_slices = nnz(word_frontier);
 
-      if number_of_slices > 2
+      if number_of_slices > 0
 
-        data = cell(number_of_slices-1, 5);     % <<<< ----- allocate space for an array that will be stores in slices,
+        data = cell(number_of_slices-1, 8);     % <<<< ----- allocate space for an array that will be stores in slices,
         % each slice begins when a word begins or ends, thus the signal extracts the samples that have words on them. One of the slices
         %is ignored, it corresponds to the cropped part of the signal ant the beggining and end of frame.
         % COLUMNS :
@@ -177,18 +179,32 @@ while radioTime < fmRxParams.StopTime
           %4 - DEMODULATED SIGNAL
           %5 - INTRA FRONTIERS AVERAGE VALUES
           %6 - UPPER AND LOWER ENVELOPES
+          %7 - WINDOW VARIANCE
+          %8 - WORD FRONTIER
 
         slice_index = find(word_frontier, number_of_slices);  % returns the index of the first n ones in the variable word_frontier, where n = number of slices
+        slice_index = [1; slice_index; SPF];
+        
 
         for a1 = 1 : length(slice_index)-1;
-          data{a1, 1} = frame_absolute(slice_index(a1, 1):slice_index(a1+1, 1));    % < -- save the signal itself in the first column of the cell array
-          data{a1, 3} = threshold(slice_index(a1, 1):slice_index(a1+1, 1));
-          data{a1, 6} = envelope_function(slice_index(a1, 1):slice_index(a1+1, 1), 1:2);
+          data{a1, 1} = frame_absolute(slice_index(a1):slice_index(a1+1)-1);    % < -- save the signal itself in the first column of the cell array
+          data{a1, 3} = threshold(slice_index(a1):slice_index(a1+1)-1);
+          data{a1, 6} = envelope_function(slice_index(a1):slice_index(a1+1)-1, 1:2);
+          data{a1, 7} = window_variance(slice_index(a1):slice_index(a1+1)-1);
+          data{a1, 8} = word_frontier(slice_index(a1):slice_index(a1+1)-1);
+
           [~, slice_offset] = Synchronize(data{a1, 1}, samples_per_bit , data{a1, 3});   % <--- save the corresponding bit frontiers for that slice and word in the respective row of the second column
+
           slice_bit_frontiers =  zeros(floor(length(data{a1, 1})/samples_per_bit), 1);
 
           for a2 = 1 : length(slice_bit_frontiers)
             slice_bit_frontiers(a2) = slice_offset + round((a2-1) * samples_per_bit);
+          end
+
+          %slice_bit_frontiers = [slice_bit_frontiers; length(data{a1, 1})];
+
+          if slice_bit_frontiers(1) ~= 1
+          slice_bit_frontiers = [1; slice_bit_frontiers]; % <- include 0 and end on the frontiers, this means the first and last interval will be uneven.
           end
 
           data{a1, 2} = slice_bit_frontiers;
@@ -199,10 +215,7 @@ while radioTime < fmRxParams.StopTime
 
         for a3 = 1 : length(data)
 
-          %data{a3, 6} =
-
           data{a3, 5} = intervals_average(data{a3, 1}, data{a3, 2});
-
           data{a3, 4} = ASK_Demod(data{a3, 1}, (data{a3, 3} .* thresh_gain) + thresh_offset, data{a3, 2});
 
           for a4 = 1 : length(data{a3, 4})  % <------- detect patterns, bit by bit
@@ -218,16 +231,18 @@ while radioTime < fmRxParams.StopTime
 
       if debug_mode == 1
 
+        alldata = cat (1, alldata, data);
+
         for a7 = 1 : length(data)
 
-          allthreshold = cat(1, allthreshold, data{a7, 3});
-          endresult = cat(1, endresult, data{a7, 4});
+          %allthreshold = cat(1, allthreshold, data{a7, 3});
+          %endresult = cat(1, endresult, data{a7, 4});
 
         end
-        allsamples = cat(1, allsamples, frame_absolute);
+        %allsamples = cat(1, allsamples, frame_absolute);
         allword_frontier = cat(1, allword_frontier, word_frontier);
-        allenvelope = cat(1, allenvelope, envelope_function);
-        allvariance = cat(1, allvariance, window_variance);
+        %allenvelope = cat(1, allenvelope, envelope_function);
+        %allvariance = cat(1, allvariance, window_variance);
         %allthreshold = cat(1, allthreshold, threshold);
         %allbit_frontier = cat(1, allbit_frontier, (data{a7, 2} + ((f-1)*SPF) ) );
       end
