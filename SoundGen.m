@@ -95,7 +95,7 @@ rising_edge = transpose([0 1]);
 patterns = {desired_result; reset_pattern; rising_edge};
 counter_patterns = zeros(1, length(patterns));  % <---- counts how many patterns are detected in the signal    MAP = [hits, tries]
 
-message = [,]; % < ------ first column for the data, second one for the hexadecimal translation
+message = cell(1,1); % < ------ first column for the data, second one for the hexadecimal translation
 
 %% ===========================================================================
 %% GUI SETUP
@@ -134,7 +134,18 @@ while radioTime < fmRxParams.StopTime
 
       % HORIZONTAL FRAMING (bit_frontier, word_window)
 
-      window_variance = define_windowvariance(SPF, frame_absolute, length(word_window));
+      %window_variance = define_windowvariance(SPF, frame_absolute, length(word_window));
+
+      window_variance = zeros(SPF, 1);
+
+      for a0 = 1 : SPF - length(word_window)
+        %window_stop = a0+length(word_window)-1;
+        word_window = frame_absolute(a0:a0+length(word_window)-1);
+        window_variance(a0, 1) = var(word_window);
+      end
+      window_variance(a0+1:end) = window_variance(a0);
+
+
 
       split = max(window_variance)*0.40;
       word_map = im2bw(window_variance, split);
@@ -195,10 +206,12 @@ while radioTime < fmRxParams.StopTime
               counter_patterns =  counter_patterns + patterns_buffer;
 
               if patterns_buffer(1,1) == 1
-                window1 = length(bilmf)-length(desired_result)+2;
-                window2 = length(bilmf)-length(desired_result)+10;
-                message(counter_patterns(1)*2) = bilmf(window1:window1+3);
-                message(counter_patterns(1)*2+1) = bilmf(window1+4:window1+7);
+                window1 = length(bilmf)-length(desired_result)+3;
+                %window2 = length(bilmf)-length(desired_result)+10;
+                message{counter_patterns(1)*2-1, 1} = transpose(bilmf(window1:window1+3));
+                message{counter_patterns(1)*2-1, 2} = binaryVectorToHex(message{counter_patterns(1)*2-1, 1});
+                message{counter_patterns(1)*2, 1} = transpose(bilmf(window1+4:window1+7));
+                message{counter_patterns(1)*2, 2} = binaryVectorToHex(message{counter_patterns(1)*2, 1});
               end
 
             end
