@@ -58,7 +58,7 @@ end
 
 
 
-offset = 0.8;
+offset = 0.4;
 pos = 1:length(allvariance);
 
 
