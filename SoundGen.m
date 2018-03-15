@@ -21,9 +21,10 @@ flag = 0;
 %% SDR RTL HARDWARE SETUP
 %% ===========================================================================
 
+
 fmRxParams = getParamsSdrrFMExamples;
 
-fmRxParams.StopTime = 14;
+fmRxParams.StopTime = 20;
 fmRxParams.RadioSampleRate = 2e6;  %% Not being used
 fmRxParams.FrequencyDeviation = 1e6; %% Not being used
 fmRxParams.SamplesPerFrame = 512*10*3;
@@ -44,7 +45,9 @@ radio = comm.SDRRTLReceiver('CenterFrequency', Fc, ...
 %% DECLARATION/INITIALIZATION/PREALOCATION OF VARIABLES
 %% ===========================================================================
 
-signal_frequency = 1.85e3 * 2; % <------ frequency of the unmodulated signal sent by the sensor
+%signal_frequency = 1.7857e3 * 2;
+%signal_frequency = 1785 * 2; % <------ frequency of the unmodulated signal sent by the sensor
+signal_frequency = 3650; % <------ frequency of the unmodulated signal sent by the sensor
 bits_per_word = 11; % <----- has to be adjusted to the expected recieved transmission
 
 
@@ -62,19 +65,16 @@ f = 0;  % <----- total frames processed counter;
 data = [];
 alldata = [];
 endresult = [];
-
-
-
 allvariance = [];
 allword_frontier = [];
-
+alloffsets = 0;
 
 m = 6; % <--- it's advisable to select m such as bilmf > 1000 to facilitate the UI generation. under normal circunstances this means m >= 6
 bilmf = zeros(ceil(bits_per_frame * m), 1);  % <-------- Bits in Last m Frames: stores last 3 frames worth of bits for pattern recognition
 
 % WORD DETECTION VARIABLES
 
-word_window = zeros( ceil(samples_per_bit*(bits_per_word)) , 1);
+word_window = zeros( ceil(samples_per_bit*(bits_per_word+4)) , 1);
 window_variance = [];
 word_map = [];
 word_frontier = [];
@@ -91,13 +91,12 @@ word_success_rate = 0; % <------ hits/tries (NOT 100% TRUSTABLE);
 bit_success_rate = 0; % <------ nthroot(bits_per_word, word_success_rate)
 
 thresh_gain= 1;  % <------ threshold line control
-thresh_offset = 0;
+thresh_offset = -0.003;
 envelope_offset = 0; % <------ envelope line control
 
 frame_start = zeros(1000,1);
-bit_frontier = zeros(floor(SPF / samples_per_bit), 1); % <--- space allocation for the array that will store the indexes of the samples that separate two different bits
 
-desired_result = transpose([0 0 1 1 0 1 0 1 0 1 0 1 0]);
+desired_result = transpose([1 1 0 1 0 1 0 1 0 1]);
 reset_pattern = transpose([0 0 0 0 0 0 0 0 0 1]);
 rising_edge = transpose([0 1]);
 patterns = {desired_result; reset_pattern; rising_edge};
@@ -124,7 +123,7 @@ debug_mode = 1; % <- binary variable that determines if permanent samples are st
 %% MAIN CYCLE
 %% ===========================================================================
 
-pause(2);
+%pause(2);
 
 tic;
 while radioTime < fmRxParams.StopTime
@@ -142,7 +141,8 @@ while radioTime < fmRxParams.StopTime
 
       % VERTICAL FRAMING (ENVELOPE)
 
-      [yupper,ylower] = envelope(last_n_frames, 100000 ,'peak');
+      nz = find(last_n_frames,1,'first');
+      [yupper,ylower] = envelope(last_n_frames(max(1, nz-1):end), 100000 ,'peak');
       envelope_function = [yupper,ylower];
       envelope_function = envelope_function(end-SPF+1:end , 1:2);
       threshold = (mean(envelope_function, 2) .* thresh_gain) + thresh_offset;
@@ -158,7 +158,7 @@ while radioTime < fmRxParams.StopTime
       end
       window_variance(a0+1:end) = window_variance(a0);
 
-      split = (max(window_variance)-min(window_variance))*0.2;
+      split = max(window_variance)*0.40;
       word_map = im2bw(window_variance, split);
       word_frontier = [(abs(word_map(1:end-1)-word_map(2:end))); 0];  % <------ these three lines create an array that is filled with zeros except when a word begins or ends
       word_frontier(round(samples_per_word/1.66)+1 : end) = word_frontier(1:end-round(samples_per_word/1.66));
@@ -182,9 +182,11 @@ while radioTime < fmRxParams.StopTime
           %7 - WINDOW VARIANCE
           %8 - WORD FRONTIER
 
+          [nrData,ncData]=size(data);
+
         slice_index = find(word_frontier, number_of_slices);  % returns the index of the first n ones in the variable word_frontier, where n = number of slices
         slice_index = [1; slice_index; SPF];
-        
+
 
         for a1 = 1 : length(slice_index)-1;
           data{a1, 1} = frame_absolute(slice_index(a1):slice_index(a1+1)-1);    % < -- save the signal itself in the first column of the cell array
@@ -196,15 +198,18 @@ while radioTime < fmRxParams.StopTime
           [~, slice_offset] = Synchronize(data{a1, 1}, samples_per_bit , data{a1, 3});   % <--- save the corresponding bit frontiers for that slice and word in the respective row of the second column
 
           slice_bit_frontiers =  zeros(floor(length(data{a1, 1})/samples_per_bit), 1);
+          alloffsets(length(alloffsets)+1) = slice_offset;
 
           for a2 = 1 : length(slice_bit_frontiers)
             slice_bit_frontiers(a2) = slice_offset + round((a2-1) * samples_per_bit);
           end
 
-          %slice_bit_frontiers = [slice_bit_frontiers; length(data{a1, 1})];
+          slice_bit_frontiers = [slice_bit_frontiers; length(data{a1, 1})];
 
-          if slice_bit_frontiers(1) ~= 1
-          slice_bit_frontiers = [1; slice_bit_frontiers]; % <- include 0 and end on the frontiers, this means the first and last interval will be uneven.
+          if  ~isempty(slice_bit_frontiers)
+            if slice_bit_frontiers(1) ~= 1
+              slice_bit_frontiers = [1; slice_bit_frontiers]; % <- include 0 and end on the frontiers, this means the first and last interval will be uneven.
+            end
           end
 
           data{a1, 2} = slice_bit_frontiers;
@@ -213,7 +218,7 @@ while radioTime < fmRxParams.StopTime
 
         % DATA PROCESSING
 
-        for a3 = 1 : length(data)
+        for a3 = 1 : nrData
 
           data{a3, 5} = intervals_average(data{a3, 1}, data{a3, 2});
           data{a3, 4} = ASK_Demod(data{a3, 1}, (data{a3, 3} .* thresh_gain) + thresh_offset, data{a3, 2});
