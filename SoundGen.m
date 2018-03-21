@@ -46,7 +46,7 @@ radio = comm.SDRRTLReceiver('CenterFrequency', Fc, ...
 %signal_frequency = 1.7857e3 * 2;
 %signal_frequency = 1785 * 2; % <------ frequency of the unmodulated signal sent by the sensor
 signal_frequency = 3650; % <------ frequency of the unmodulated signal sent by the sensor
-bits_per_word = 11; % <----- has to be adjusted to the expected recieved transmission
+bits_per_word = 32; % <----- has to be adjusted to the expected recieved transmission
 
 signal_period = 1/signal_frequency; % <----- period of the unmodulated signal
 samples_per_bit = Fs * signal_period; % <----- number of samples in each bit of the recieved message, this number is not necessarily an integer
@@ -68,7 +68,7 @@ bilmf = zeros(ceil(bits_per_frame * m), 1);  % <-------- Bits in Last m Frames: 
 
 % WORD DETECTION VARIABLES
 
-word_window = zeros( ceil(samples_per_bit*(bits_per_word+4)) , 1);
+word_window = zeros( ceil(samples_per_bit*(15)) , 1);
 window_variance = [];
 word_map = [];
 word_frontier = [];
@@ -150,8 +150,8 @@ while radioTime < fmRxParams.StopTime
       split = max(window_variance)*0.40;
       word_map = im2bw(window_variance, split);
       word_frontier = [(abs(word_map(1:end-1)-word_map(2:end))); 0];  % <------ these three lines create an array that is filled with zeros except when a word begins or ends
-      word_frontier(round(samples_per_word/1.66)+1 : end) = word_frontier(1:end-round(samples_per_word/1.66));
-      word_frontier(1:round(samples_per_word/1.66)) = 0;
+      word_frontier(round(length(word_window)/1.66)+1 : end) = word_frontier(1:end-round(length(word_window)/1.66));
+      word_frontier(1:round(length(word_window)/1.66)) = 0;
 
       number_of_slices = nnz(word_frontier);
 

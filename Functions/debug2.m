@@ -3,7 +3,7 @@ extensive_debug = 1;
 %alldata2 = alldata;
 
 alldata2 = cell(floor(length(alldata)/2), 8);
-alldata2 = alldata((length(alldata)/2):end, 1:end);
+alldata2 = alldata(floor(length(alldata)/2):end, 1:end);
 
 figure(10);
 
@@ -84,7 +84,7 @@ if extensive_debug == 1
     b2 = mean(allsamples (allbit_frontier(b1):allbit_frontier(b1+1)));
     b3 = endresult(b1);
   plot([allbit_frontier(b1), allbit_frontier(b1+1)], [b2,b2] , '--r');
-  plot([allbit_frontier(b1), allbit_frontier(b1+1)], [b3, b3] .*0.4 + 0.7, 'k')
+  %plot([allbit_frontier(b1), allbit_frontier(b1+1)], [b3, b3] .*0.4 + 0.7, 'k')
   %z1 = plot([bit_frontier(b1), bit_frontier(b1)], [0, 1.5], 'k');  %<---- comment to turn off black vertical separation lines
   end
 end
