@@ -89,7 +89,7 @@ envelope_offset = 0; % <------ envelope line control
 
 frame_start = zeros(1000,1);
 
-desired_result = transpose([1 1 0 1 0 0 0 1 0 0 0 1 0 1 0 0 1 1 0 0 0 1 1 1 0 0 0 0 1 1 1 1]);
+desired_result = transpose([0 0 0 1 1 0 1 0 0 0 1 0 0 0 1 0 1 0 0 1 1 0 0 0 1 1 1 0 0 0 0 1 1 1 1 0 0 0]);
 reset_pattern = transpose([0 0 0 0 0 0 0 0 0 1]);
 rising_edge = transpose([0 1]);
 patterns = {desired_result; reset_pattern; rising_edge};
@@ -127,7 +127,7 @@ while radioTime < fmRxParams.StopTime
       % VERTICAL FRAMING (ENVELOPE)
 
       nz = find(last_n_frames,1,'first');
-      [yupper,ylower] = envelope(last_n_frames(max(1, nz-1):end), 100000 ,'peak');
+      [yupper,ylower] = envelope(last_n_frames(max(1, nz-1):end), SPF * 2 ,'peak');
       envelope_function = [yupper,ylower];
       envelope_function = envelope_function(end-SPF+1:end , 1:2);
       threshold = (mean(envelope_function, 2) .* thresh_gain) + thresh_offset;
@@ -152,6 +152,8 @@ while radioTime < fmRxParams.StopTime
       word_frontier = [(abs(word_map(1:end-1)-word_map(2:end))); 0];  % <------ these three lines create an array that is filled with zeros except when a word begins or ends
       word_frontier(round(length(word_window)/1.66)+1 : end) = word_frontier(1:end-round(length(word_window)/1.66));
       word_frontier(1:round(length(word_window)/1.66)) = 0;
+      word_frontier(1) = 1;
+      word_frontier(end) = 1;
 
       number_of_slices = nnz(word_frontier);
 
@@ -173,7 +175,7 @@ while radioTime < fmRxParams.StopTime
           [nrData,ncData]=size(data);
 
         slice_index = find(word_frontier, number_of_slices);  % returns the index of the first n ones in the variable word_frontier, where n = number of slices
-        slice_index = [1; slice_index; SPF];
+        %slice_index = [1; slice_index; SPF];
 
         for a1 = 1 : length(slice_index)-1;
           data{a1, 1} = frame_absolute(slice_index(a1):slice_index(a1+1)-1);            % < -- save the signal itself in the first column of the cell array
@@ -218,6 +220,7 @@ while radioTime < fmRxParams.StopTime
           end
         end
       end
+
 
       if debug_mode == 1
         alldata = cat (1, alldata, data);

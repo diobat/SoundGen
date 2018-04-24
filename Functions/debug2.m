@@ -1,9 +1,9 @@
 extensive_debug = 1;
 
-%alldata2 = alldata;
+alldata2 = alldata;
 
-alldata2 = cell(floor(length(alldata)/2), 8);
-alldata2 = alldata(floor(length(alldata)/2):end, 1:end);
+%alldata2 = cell(floor(length(alldata)/2), 8);
+%alldata2 = alldata(floor(length(alldata)/2):end, 1:end);
 
 figure(10);
 
@@ -62,7 +62,7 @@ offset = 0.8;
 pos = 1:length(allvariance);
 
 
-plot(pos, allvariance * 20 + offset, 'c');
+%plot(pos, allvariance * 20 + offset, 'c');
 
 split = (max(allvariance)-min(allvariance))*0.30;
 split_bin = im2bw(allvariance, split);
@@ -70,13 +70,13 @@ split_bin = im2bw(allvariance, split);
 split = split * 20 + offset;
 pos3 = 1:1:length(split_bin);
 
-plot([1 length(allvariance)], [split split], 'k');
+%plot([1 length(allvariance)], [split split], 'k');
 
 
-%plot(pos3, split_bin * 0.1 + 0.5, 'r');
+%%%%%%%%%%%%%%%plot(pos3, split_bin * 0.1 + 0.5, 'r');
 
 pos4 = 1:1:length(allword_frontier);
-plot(pos4, allword_frontier* -0.6 + offset, 'r');
+%plot(pos4, allword_frontier* -0.6 + offset, 'r');
 
 
 if extensive_debug == 1
