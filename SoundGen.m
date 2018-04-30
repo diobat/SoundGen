@@ -38,6 +38,7 @@ radio = comm.SDRRTLReceiver('CenterFrequency', Fc, ...
                             'EnableTunerAGC', true, ...
                             'SamplesPerFrame', fmRxParams.SamplesPerFrame, ...  %potencia de 2
                             'OutputDataType', 'single');
+                            
 
 %% ===========================================================================
 %% DECLARATION/INITIALIZATION/PREALOCATION OF VARIABLES
